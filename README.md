@@ -2,6 +2,7 @@
 
 A brief introduction to data visualization in R highlighting some base R functions (`hist` and `boxplot`), 
 easy heatmap plotting using `pheatmap` and a high-level introduction to using `ggplot2` and `tidyverse`.
+Using ggplot2, the markdown showcases basic plot concepts including 1) PCA plot 2) boxplots (including jittered points) 3) scatterplots 4) ggplot2 themes (including `cowplot` package) and 5) facetting.
 
 All code is gathered in [analysis.Rmd](analysis.Rmd) and the finished report available under [analysis.html](analysis.html).
 
