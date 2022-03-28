@@ -1,0 +1,4 @@
+*.tsv
+*.csv
+*.Rhistory
+./analysis_files/

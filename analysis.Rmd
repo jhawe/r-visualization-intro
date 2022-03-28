@@ -1,0 +1,558 @@
+---
+title: "A quick introduction to data visualization"
+author: Johann Hawe
+output:
+  html_document:
+    toc: TRUE
+    df_print: paged
+  pdf_document: default
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(message = F, warning = F, error = F)
+```
+
+## Introduction
+
+In this tutorial we will show how to visualize some data using `R` and `ggplot2`.
+For demonstration purposes we will investigate a public cancer gene expression dataset.
+More information on the dataset is given here:
+https://www.kaggle.com/brunogrisci/breast-cancer-gene-expression-cumida/version/2
+
+We slightly modified it to include proper gene symbols instead of the Affymetrix probe IDs.
+Also, we modified the 'type' information to not go into details about the tissue/cancer types. 
+You can explore the 'original' dataset whenever you feel like it :)
+
+## Setup 
+
+First, we are going to load the necessary `R` packages. 
+Thanks to our reproducible environment (i.e. a docker image) these are already installed.
+In our cases we rely on `tidyverse`, which represents a collection of a few useful packages.
+We also load some other packages which are 'nice to have' - but you could do without as well.
+
+> Note: Select the cell (or 'code chunk') below and hit `Ctrl+Enter` to execute one individual line or look to the very right of the cell and hit the green arrow (`Run current chunk`) to run the complete chunk.
+
+```{r setup}
+library(tidyverse)
+library(pheatmap)
+library(reshape2)
+library(ggbiplot)
+```
+
+After running the chunk above you might see some messages - you can ignore them.
+Using the above code, we will have a bunch of useful packages directly available, including for instance `dplyr`, `readr` and `ggplot2` (these are implicitely loaded when loading `tidyverse`).
+
+Before we go into any details, remember that you can get help to any package or function you see by 
+typing `?<name>`, e.g.:
+
+```{r}
+?ggplot2
+?read_tsv
+```
+
+## Loading the data and intro to R basics
+
+Now we can use the `readr` package's function `read_csv()` to read in our gene 
+expression dataset. 
+You can execute the following code chunk to achieve this and which will
+save all data in the code variable `data` (this could take a bit).
+
+```{r}
+data <- read_tsv("cancer_dataset.tsv")
+```
+
+Now we can already have a first look at the data, just type the variable name (`data`) and execute the code 
+(we will also subset to the first 5 columns):
+
+> Note: The variable actually is of the 'tibble' type, but we will not go into details here. Let's just say this is a very convenient format to work with data, for instance, it gets automatically nicely formatted when we print it as shown below.
+
+```{r}
+data[,c(1,2,3,4,5)]
+```
+
+> Note: Using the `c()` function we can create arbitrary vectors/arrays, with individual elements separated by `,`.
+
+As you can see there are a total of 151 rows, but how many columns are in the full table?
+To get this information, we could also call the  `dim()` base R function (works on most kinds of tables and matrices):
+
+```{r}
+dim(data)
+```
+
+> **Question**: What do these two numbers represent?
+
+You can see that we have two columns describing the samples, `samples` and `type`.
+`samples` just represents an ID and we don't use it for now. `type` is the actual
+'tissue' type from which these data originated (again, we modified it to be a bit 
+simpler and not show individual cancer subtypes).
+To see what sort of types are available, we can print only this column using the `$` operator:
+
+```{r}
+data$type
+
+# alternative:
+# data[,'type']
+
+```
+
+Now that is not very nice. Luckily, there is a convenient way of summarizing these data into
+a table, getting counts of how often individual terms occurred on the way:
+
+```{r}
+table(data$type)
+```
+
+Using `tidyverse` it is also easy to filter the data or extract specific information.
+In the following code chunk there are a few examples how you can use `tidyverse` functions 
+to wrangle your data.
+
+```{r}
+# filter type to be 'cell_line'
+filter(data, type == "cell_line")
+
+# filter and get totals
+filter(data, type == "cell_line") %>%
+  tally()
+
+# filter and subset columns
+filter(data, type == "cell_line") %>%
+  dplyr::select(type, BRCA1, TP53, LPA)
+
+# mix with base R functions (sometimes useful, not always recommended)
+pull(data, type) %>%
+  table
+
+# group the data by 'type' information and get total number of samples
+# per type
+group_by(data, type) %>%
+  dplyr::summarize(total_samples = n())
+
+# same as last one but using 'tally'
+group_by(data, type) %>%
+  tally()
+
+# get mean expression per sample type for all genes,
+# remove 'samples' identifier as mean of that column doesn't make sense
+group_by(data, type) %>%
+  select(-samples) %>%
+  dplyr::summarize(across(everything(), mean))
+```
+
+
+## Exploring data using base R visualizations
+
+Now we focus on the expression data themselves and plot some data!
+First, subset the data to only include the gene expression columns and not the sample annotations.
+With the square bracket operator on the data table (`data[,]`) we have the options to select rows or columns as you've seen above.
+For instance, to select the value in the second row and fourth column you'd execute `data[2,4]`.
+But you can also select whole columns without subsetting the rows or, as we do it, remove columns but keeping all row information intact.
+
+```{r}
+expression <- data[,-c(1,2)]
+expression[1:5,1:5]
+```
+
+> **Question**: What does the expression `1:5` do?
+
+> Note: By supplying the negative indices `-c(1,2)` as a selector to the data frame, we tell R to 'remove columns 1 and 2'.
+
+Ok, now we are interested to see the distribution of our data which could affect any downstream analyses. 
+For a start we'll just use the base R plotting functions.
+
+First, simply create an overall histogram and some boxplots for our data and see expression values across genes for the first 50 samples:
+
+The histogram over all samples and genes:
+
+> Note: for `hist()` to work with this specific data table we need to convert it to a matrix first using `data.matrix()`. This is a special case and you can ignore it for now.
+
+```{r}
+hist(data.matrix(expression), xlab = "expression")
+```
+
+So `hist()` will simply take all values in the matrix and create a basic histogram.
+With the `xlab` parameter we can specify a custom axis label.
+
+> **Question**: How can you specify a custom heading for this histogram?
+
+Now the boxplots to show the per-sample distributions:
+
+> Note: We use the `t()` method to transpose the matrix to have all genes in the rows and samples in the columns.
+
+```{r}
+boxplot(t(expression[1:50,]))
+```
+
+## Gene co-expression heatmap using 'pheatmap'
+
+Now we go into a bit more details. First, we select only a random subset of 2,000 genes on which to perform our analysis (to make the code run faster, usually we wouldn't do it like this).
+
+```{r}
+set.seed(42)
+
+random_subset <- sample(1:ncol(expression), 2000)
+expression_subset <- expression[,random_subset]
+```
+
+> **Question**: What does the command `set.seed(42)` do?
+
+> Note: using the `sample()` function we can create a random subset of the provided vector. In our case we provide all indices from 1 to the numnber of available columns in the expression data (specified by `ncol(expression)`) and define a subset size of 2000.
+
+Based on the defined subset above, let's just create some more plots to get an idea of how we can work with the data.
+
+Using the subset we do not have to worry about performance or waiting times which is nice for this tutorial.
+
+Let's create a gene-by-gene correlation matrix across all samples and show the results in a nice heatmap. As this will take a bit with only 2000 genes still, we will subset to 50 genes only:
+
+```{r}
+expression_corrs <- cor(expression_subset[,1:50])
+rownames(expression_corrs) <- colnames(expression_corrs) <- colnames(expression_subset[,1:50])
+
+pheatmap(expression_corrs)
+```
+
+So this is a quick and easy way to generate a nice heatmap including clustering.
+You already can see some genes grouping together and clusters emerging based on their correlation to each other.
+
+Let's have a more detailed look at the data, and let's finally check out how we can plot
+stuff using `ggplot2`!
+
+## Quick visualization of Principle Component Analysis (PCA) results
+
+First we'll be doing a straight forward Principal Component Analysis.
+We will not go into any theory, suffice to say that we check whether individual sample types cluster together.
+In R it is easy to do the basic computations involved by just calling the `prcomp()` base R function.
+We supply the `scale. = T` parameter as this is typically recommended.
+
+```{r}
+pca_result <- prcomp(expression_subset, scale. = T)
+```
+
+We can then go ahead and create a `biplot` with ggplot using the `ggbiplot` package.
+The `ggbiplot()` is very convenient and we do not have to do anything else to create a nice summary.
+The `var.axes = F` parameter tells the function to not include labeled arrows 
+showing the variables (would make the plot a bit crowded, but you can test it if you want).
+
+```{r}
+ggbiplot(pca_result, var.axes = F)
+```
+
+You can see that there are at least two clusters presented in the PCA plot.
+Typically what you'd want to do is to see whether these are correlated with your sample types or some likely batch effect variable.
+We can do this by supplying the group information to the `ggbiplot()` function (for this we extract first the `type` information from our data).
+
+```{r}
+types <- data %>% pull(type)
+gp_pca <- ggbiplot(pca_result, groups = types, var.axes = F)
+gp_pca
+```
+
+Nice - well done!
+
+## ggplot2 basics
+
+Above we got a glimpse of a very high level function of the `ggplot` universe.
+Now we'll introduce the very basic ggplot2 concepts and functions in more detail and show you how we can create some nice visualizations.
+
+With `ggplot2` every plot is organized in layers which are built together step by step.
+To create a blank canvas, simply call `ggplot()`:
+
+```{r}
+ggplot()
+```
+
+Nothing to see here, really, no axes or titles or points or whatever. 
+It's the same greyish background you also see for the PCA plot above.
+
+We can now add the data and create an 'aesthetics' mapping, i.e. we need to tell ggplot which variable in our data frame should be mapped to which 'plot property' (such as the x or y axes, the colors, etc.).
+
+For now, let's just create a scatterplot of two genes in our data which show relatively high correlation:
+
+> Note: with `select()` we can select individual columns from our data, see above
+
+```{r}
+plot_data <- bind_cols(select(data, type),
+                       select(expression, PRR11, SMG8))
+gp <- ggplot(data = plot_data, mapping = aes(x=PRR11, y=SMG8))
+gp
+```
+
+> Note: We saved the base ggplot object including the data and basic aesthetics mapping in the 'gp' variable to be able to quickly reuse it.
+
+You can see this already added some information, such as the axis labels and a grid.
+But we do not see the actual data yet,.. what the heck?!
+Keep calm, this is only because we also need to specify HOW these data should be displayed.
+
+Specifically, we can specify `geoms` (geometries) which tell `ggplot2` how to display our data.
+For instance, we can use `geom_point()` to display simple points and thus create a scatterplot:
+
+```{r}
+gpp <- gp + geom_point()
+gpp
+```
+
+So we added another layer (`geom_point()`) to the original ggplot object, indicated by using the `+` symbol.
+Any aesthetics and data defined in a previous layer (here: base layer with `ggplot()`) get inherited to the next layer (here: `geom_point()`), this is why the point coordinates correspond to the defined 'gene expression to x and y' mapping.
+
+We can now more or less arbitrarily add additional layers.
+For instance, let's add a regression line for this 'correlation analysis':
+
+```{r}
+gpp + geom_smooth(method = "lm")
+```
+
+> **Question**: What does the shaded area represent? How can you remove it?
+
+```{r include = FALSE}
+gpp + geom_smooth(method = "lm", se = F)
+```
+
+Finally, we can modify the display of the individual points. For instance,
+we might want to color the points according to their respective sample type.
+Again, we can use the aesthetics mapping to achieve this. This time we provide
+it in the `geom_point()` layer.
+
+```{r}
+gp + geom_point(aes(color = type))
+```
+
+Here, adding the color information is just for demonstration and doesn't add a lot of information.
+Alternatively, you can simply adjust the color of the points not based on the type, but set them to 
+a specific color value:
+
+```{r}
+gpp <- gp + geom_point(color = "orange")
+gpp
+```
+
+> **Question**: What is the main difference between the two last plot instructions? When would you want to choose one over the other?
+
+### Optional: using 'facets' to structure your plots
+
+Lastly, you can easily divide the plot according to the sample information into separate 'facets', i.e. creating three distinct plots showing data only for the respective sample:
+
+```{r}
+
+gpp +
+  facet_wrap(~type, nrow = 3)
+
+```
+
+Alternatively, column-wise display and add smoothing:
+
+```{r}
+gpp +
+  geom_smooth(method = "lm") + 
+  facet_wrap( ~ type)
+```
+
+Facets are a neat way of creating different subplots based on specific categories etc. and providing per-category summaries.
+
+## Employing visual themes - 'cowplot'!
+
+You might have an issue with the numbers displayed in the plot being a bit small and the plot maybe not being quite 'publication ready' as it is now (grey background is discouraged, for instance, bad 'ink-to-information ratio' overall).
+There is a package called `cowplot` which provides a ggplot theme for very 'lean' and almost publication ready plots. 
+For instance removing unnecessary 'ink', increasing font sizes etc. 
+Two lines of code are all it takes to add this theme to our plot!
+
+```{r}
+library(cowplot)
+```
+
+Now we can plot again and see the difference:
+
+```{r}
+gpp + 
+  geom_smooth(method = "lm") + 
+  theme_cowplot()
+```
+
+> Note 1: You can also globally set a theme so that you do not have to specify it over and over again. You can do so using the `theme_set()` function of ggplot2, e.g.: `theme_set(theme_cowplot())`.
+
+> Note 2: There are also other themes built in with ggplot, you can try out some of them (e.g. `theme_bw()`)
+
+For some of you the default `cowplot` theme might be a bit too 'lean', but we can modify this as we please. 
+To get some background grid again, we can use the `cowplot` function `background_grid()` and add this to the plot:
+
+```{r}
+gpp + geom_smooth(method = "lm") + 
+  theme_cowplot() + 
+  background_grid()
+```
+
+Ah, and you can also add this theme to the PCA plot from before!
+
+```{r}
+gp_pca + theme_cowplot() + background_grid()
+```
+
+> **Question**: How can you display only horizontal lines, excluding the vertical ones?
+
+```{r include = FALSE}
+gp_pca + theme_cowplot() + background_grid(major = "y", minor = "y")
+```
+
+Lastly, you can also use some of the built in themes of `ggplot2`, for instance:
+
+```{r}
+gp_pca + theme_bw()
+gp_pca + theme_dark()
+gp_pca + theme_minimal_grid()
+```
+
+> Note: `theme_minimal_grid()` is very similar to cowplot, but the cowplot package provides several other convenient functions to not be quite useless ;)
+
+## Advanced boxplots with ggplot2
+
+### Melting data
+
+`ggplot2` typically works well on 'long' data tables, i.e. information we have in our matrix in the columns will be transformed to row entries, identified by the original row and column names.
+We can use the `melt()` function from the `reshape2` package for this. 
+
+```{r}
+plot_data_melted <- reshape2::melt(plot_data)
+head(plot_data_melted)
+dim(plot_data_melted)
+```
+
+> **Question**: What does the `head()` function do? Why do we want it here?
+
+You can see that we have a very 'tall' (row-wise) table now, and each row contains one entry of the previous dataset, identified by `type` and `variable`.
+
+Let's set nicer names to our data, easier to remember:
+
+```{r}
+colnames(plot_data_melted) <- c("type", "gene", "expression")
+```
+
+### Boxplots with ggplot2
+
+Now we can use these data to get some plotting done. Let's just plot the distributions
+of the two genes across the different samples:
+
+```{r}
+ggplot(plot_data_melted, aes(y=expression, x=gene)) +
+  geom_boxplot()
+```
+
+Again, let's add the `cowplot` theme:
+
+```{r}
+ggplot(plot_data_melted, aes(y=expression, x=gene)) +
+  geom_boxplot() +
+  theme_cowplot()
+```
+
+You can also split the x-axis along the different sample types to see whether genes 
+show different overall expression for the individual sample types.
+Here will filter for a single gene (PRR11) and look at the data again:
+
+```{r}
+gp <- ggplot(filter(plot_data_melted, gene == "PRR11"),
+             aes(y = expression, x = type)) +
+  geom_boxplot() +
+  theme_cowplot()
+gp
+```
+
+### Adding data points to the boxplots
+
+I typically also like to show all the data points if possible. 
+As mentioned above, we can add additional layers to the plot as we please.
+So let's add the individual data points. All we need to do is to specify an additional 
+`geom_point()` to our plot:
+
+```{r}
+gp + geom_point()
+```
+
+Now the points are there, but we don't see much. Luckily ggplot also provides a geom which automatically introduces some 'jittering' on the x-axis: `geom_jitter()`
+
+```{r}
+gp + geom_jitter(width = 0.2)
+```
+
+To make it a bit more fancy we add different colors (though this is not necessary and doesn't really add information..):
+
+```{r}
+gpj <- gp + geom_jitter(width = 0.2, aes(color = type))
+gpj
+```
+
+You can play around with it if you want!
+For instance, increase point size:
+
+```{r}
+gpj <- gp + geom_jitter(width = 0.2, size = 3, 
+                        aes(color = type))
+gpj
+```
+
+> **Question**: Did you notice the additional black dot in the plot? Why is it there? How can you get rid of it?
+
+We can add the background grid again, but let's only add the horizontal lines:
+
+```{r}
+gpj + 
+  background_grid(major = "y", minor = "y")
+```
+
+Finally, remember the utility functions from `dplyr` from the beginning of this document?
+We can modify the data as we need and directly supply to ggplot to generate a summary plot.
+As an example, let's summarize all expression values for each sample type across all samples for a handful of genes and plot the distribution of summarized mean expression values for all three types (that's a mouthful..). 
+
+```{r}
+gp <- select(data, type, TP53, RFC2, LPA, BRCA1, DDR1, TMEM239) %>%
+  group_by(type) %>%
+  dplyr::summarize(across(everything(), mean)) %>%
+  melt() %>%
+  ggplot(aes(x=type, y=value)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(color = type), size=3) +
+  theme_cowplot() + 
+  background_grid(major = "y", minor = "y")
+gp
+```
+
+### Adding text labels
+
+And just for fun, sometimes we might want to label individual data points in our plot.
+We can use the very convenient `ggrepel::geom_label_repel()` function for this, which also takes care of labels not being placed atop each other.
+
+```{r}
+gp +
+  ggrepel::geom_label_repel(aes(label = variable),
+                            min.segment.length = 0.01)
+```
+
+> **Question**: The labels are just a bit off, this is because the `geom_label_repel()` function
+doesn't know about the 'jittering' - how could you avoid this? Hint: you can use the `position_jitter()` function to create a 'jittered position' variable. If done correctly, plot should look like the one below.
+
+```{r echo = FALSE}
+pos <- position_jitter(width=0.2, seed = 2)
+
+select(data, type, TP53, RFC2, LPA, BRCA1, DDR1, TMEM239) %>%
+  group_by(type) %>%
+  dplyr::summarize(across(everything(), mean)) %>%
+  melt() %>%
+  ggplot(aes(x=type, y=value)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(aes(color = type), size=3, position = pos) +
+  ggrepel::geom_label_repel(position = pos, min.segment.length = 0.01,
+                            aes(label = variable)) + 
+  theme_cowplot() + 
+  background_grid(major = "y", minor = "y")
+
+```
+
+That's it - well done!
+
+## Session Info
+
+Last but not least, and for reproducibility purposes, I always recommend printing the R session information 
+at the end of a report. This gives an overview of the R version and all packages used during the analysis, including their versions.
+
+> Note: Below we use the base R `sessionInfo()` function. I usually like the `devtools` one better, e.g.: `devtools::session_info()` (if the `devtools` package is installed).
+
+```{r}
+sessionInfo()
+```
